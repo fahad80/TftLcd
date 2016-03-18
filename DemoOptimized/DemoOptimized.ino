@@ -52,6 +52,14 @@ GNU General Public License for more details.
 */
 //---------------------------------------------------------
 
+#define WR_ACTIVE PORTC &= ~0x2
+#define WR_IDLE   PORTC |= 0x2
+#define WR_STROBE { WR_ACTIVE; WR_IDLE; }
+#define DC_DATA   PORTC |= 0x4
+#define DC_CMD    PORTC &= ~0x4
+#define setDataInline(value) {PORTB = (PORTB & ~0x03) | (value & 0x03); PORTD = (PORTD & 0x03) | (value & ~0x03);}
+    
+
 // Control Pins
 int RES = A3;     // /RES -> A3
 int DC = A2;      // DC -> A2   (Command:0 Data:1)
@@ -63,23 +71,70 @@ int RD = A0;      // /RD -> A0
 
 void write_command(unsigned char value)
 {
-  digitalWrite(DC, LOW);                    //(Command:0 Data:1)
+  DC_CMD;                    //(Command:0 Data:1)
     
   PORTB = (PORTB & ~0x03) | (value & 0x03); // or PORTB = (PORTB & 0b11111100) | (value & 0b00000011)
   PORTD = (PORTD & 0x03) | (value & ~0x03); // or PORTD = (PORTD & 0b00000011) | (value & 0b11111100)
   
-  digitalWrite(WR, LOW);
-  digitalWrite(WR, HIGH);
+  WR_ACTIVE;
+  WR_IDLE;
 }
 
 void write_data(unsigned char value)
 {
-  digitalWrite(DC, HIGH);
-  PORTB = (PORTB & ~0x03) | (value & 0x03);
-  PORTD = (PORTD & 0x03) | (value & ~0x03);
- 
-  digitalWrite(WR, LOW);
-  digitalWrite(WR, HIGH);
+  DC_DATA;
+  setDataInline(value);
+  WR_ACTIVE;
+  WR_IDLE;
+
+  // The below commented out code is similar to the above code.
+  // Remove the comment from below and comment out above code to
+  // see how slow the below code is.
+
+//  digitalWrite(DC, HIGH);
+//  PORTB = (PORTB & ~0x03) | (value & 0x03);
+//  PORTD = (PORTD & 0x03) | (value & ~0x03);
+// 
+//  digitalWrite(WR, LOW);
+//  digitalWrite(WR, HIGH);
+}
+
+void white_fill()
+{
+  long i;                       // 240*360 = 76800 requires more then 16 bit. int wont be enough
+  write_command(0x2C);          // command to begin writing to frame memory
+  
+  write_data(0b11111100);       // Write the Data once. For white the value for R,G and B is same. So just toggling WR will do the trick
+                                // Toggling has to be for (240*320*3) = 230400 times
+  for(i=0;i<230399;i++)         //fill screen with white pixels
+  {
+    //digitalWrite(WR, LOW);    // To check how fast the below two lines are, comment out those
+    //digitalWrite(WR, HIGH);   // two lines and remove comment form digitalWrite.
+    
+    WR_ACTIVE;
+    WR_IDLE;
+  }
+}
+
+void black_fill()
+{
+  unsigned int i;              
+  write_command(0x2C);          // command to begin writing to frame memory
+  DC_DATA;
+  setDataInline(0b00000000);      
+                                
+  for(i=0;i<57600;i++)         //fill screen with Black pixels
+  {
+    WR_STROBE; WR_STROBE; WR_STROBE; // 3 bytes/pixel
+    WR_STROBE; WR_STROBE; WR_STROBE; // in total...
+    WR_STROBE; WR_STROBE; WR_STROBE; //............
+    WR_STROBE; WR_STROBE; WR_STROBE; //...writing 4 pixels
+  }
+
+  // Compare to white fills, this is faster. With this we don't have to use "long i".
+  // It might look like there isn't much difference, but there is. Also, the loop 
+  // iteration is less. In assembly JUMP instruction requires more then one cycle.
+  // Less iteration means less JUMP.
 }
 
 
@@ -88,13 +143,7 @@ void fill_display()
   unsigned long i;              // 240*360 = 76800 requires more then 16 bit. int wont be enough
   
   write_command(0x2C);          //command to begin writing to frame memory
-  
-  for(i=0;i<76800;i++)          // fill screen with blue pixels
-  {
-    write_data(0b00000000);     // Red    0bDDDDDDxx
-    write_data(0b00000000);     // Green  0bDDDDDDxx      // x =don't care; D = 0 or 1
-    write_data(0b11111100);     // Blue   0bDDDDDDxx
-  }
+
   
   for(i=0;i<76800;i++)          // fill screen with green pixels
   {
@@ -102,27 +151,26 @@ void fill_display()
     write_data(0b11111100);     // Green  0bDDDDDDxx      // x =don't care; D = 0 or 1
     write_data(0b00000000);     // Blue   0bDDDDDDxx
   }
-        
+
   for(i=0;i<76800;i++)          // fill screen with red pixels
   {
     write_data(0b11111100);     // Red    0bDDDDDDxx
     write_data(0b00000000);     // Green  0bDDDDDDxx      // x =don't care; D = 0 or 1
     write_data(0b00000000);     // Blue   0bDDDDDDxx
   }
-        
-  for(i=0;i<76800;i++)          //fill screen with black pixels
+   
+
+  for(i=0;i<76800;i++)          // fill screen with blue pixels
   {
-    write_data(0b11111100);     // Red    0bDDDDDDxx
-    write_data(0b11111100);     // Green  0bDDDDDDxx      // x =don't care; D = 0 or 1
-    write_data(0b11111100);     // Blue   0bDDDDDDxx
+    setDataInline(0b00000000);  // Red and Green data
+    WR_STROBE;                  // RED
+    WR_STROBE;                  // GREEN
+    write_data(0b11111100);     // Blue
   }
-        
-  for(i=0;i<76800;i++)         //fill screen with white pixels
-  {
-    write_data(0b00000000);     // Red    0bDDDDDDxx
-    write_data(0b00000000);     // Green  0bDDDDDDxx      // x =don't care; D = 0 or 1
-    write_data(0b00000000);     // Blue   0bDDDDDDxx
-  }
+
+  white_fill();   
+
+  black_fill();
 }
 
 void TFT_init()
@@ -132,7 +180,7 @@ void TFT_init()
   delay(100);
   
   write_command(0x36);    //MADCTL: memory data access control
-  write_data(0x80);       // MY (row address order) = 1  :: MX,MV,ML,RGB = 0
+  write_data(0x80);       // MY = 1  :: MX,MV,ML,RGB = 0  (MY-MX = Row/Column address order)(Display type -> Horizontal or Vertical)
   
   write_command(0x3A);    //COLMOD: Interface Pixel format *** 262K-colors in 18bit/pixel format when using 8-bit interface to allow 3-bytes per pixel
   write_data(0x66);
@@ -204,18 +252,19 @@ void TFT_init()
   write_data(0x18);
   write_data(0x16);
   write_data(0x19);
-  
+
+  // Set Window Size to 240x320
   write_command(0x2A);    //X address set
-  write_data(0x00);
-  write_data(0x00);
-  write_data(0x00);
-  write_data(0xEF);
+  write_data(0x00);       // Start from...
+  write_data(0x00);       // .... 0
+  write_data(0x00);       // End at...
+  write_data(0xEF);       // ... 239
 
   write_command(0x2B);    //Y address set
-  write_data(0x00);
-  write_data(0x00);
-  write_data(0x01);
-  write_data(0x3F);
+  write_data(0x00);       // Start from...
+  write_data(0x00);       // ... 0
+  write_data(0x01);       // End at...
+  write_data(0x3F);       // ... 319
   delay(10);
   
   write_command(0x29);  //fill_displaylay ON

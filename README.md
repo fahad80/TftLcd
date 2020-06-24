@@ -23,9 +23,3 @@ The instructions are included in the code.
 * Demo: Simple demo using Arduino functions.
 * DemoOptimized: The same demo using direct registers for faster execution.
 * LineDrawing: Sample line drawing code.
-
-
-
-### Who do I talk to? ###
-
-* fahadmirza80@yahoo.com
